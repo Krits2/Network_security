@@ -1,3 +1,3 @@
-# Network_security
+# Networksecurity course
 
 DoS/DDoS
