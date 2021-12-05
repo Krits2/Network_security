@@ -1,0 +1,142 @@
+DOS TASK1 STEPS
+
+1. install docker, docker-compose, swarmlab-hybrid
+
+2. Start/stop swarmlab-hybrid
+	
+	cd swarmlab-hybrid
+	./start
+		App running at:   - Local:    http://localhost:3088/
+	./stop
+
+3. Start Lab instance (hybrid linux).
+
+4.Connect to master container
+	krits@ubuntu:~/Desktop/swarmlab-hybrid$ docker exec -it -udocker hybrid-linux_master_1 /bin/bash
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+docker@3c273d36124c:/project$
+
+5. Find ip of master
+	docker@3c273d36124c:~$ ifconfig
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 172.30.0.2  netmask 255.255.0.0  broadcast 172.30.255.255
+        ether 02:42:ac:1e:00:02  txqueuelen 0  (Ethernet)
+        RX packets 3267376  bytes 753191485 (753.1 MB)
+        RX errors 0  dropped 114  overruns 0  frame 0
+        TX packets 7186792  bytes 1568274556 (1.5 GB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+eth1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 172.25.0.7  netmask 255.255.0.0  broadcast 172.25.255.255
+        ether 02:42:ac:19:00:07  txqueuelen 0  (Ethernet)
+        RX packets 904  bytes 40614 (40.6 KB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 766  bytes 32472 (32.4 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 3507  bytes 338343 (338.3 KB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 3507  bytes 338343 (338.3 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+6. Search for workers containers
+	docker@3c273d36124c:~$ nmap -sP 172.25.0.*
+
+Starting Nmap 7.60 ( https://nmap.org ) at 2021-12-04 17:07 EET
+Nmap scan report for ubuntu (172.25.0.1)
+Host is up (0.00046s latency).
+Nmap scan report for mongo.poc-datacollector_datacollector-net (172.25.0.2)
+Host is up (0.00036s latency).
+Nmap scan report for redisserver.poc-datacollector_datacollector-net (172.25.0.3)
+Host is up (0.00031s latency).
+Nmap scan report for readmongo_service.poc-datacollector_datacollector-net (172.25.0.4)
+Host is up (0.00028s latency).
+Nmap scan report for dummy_service.poc-datacollector_datacollector-net (172.25.0.5)
+Host is up (0.00020s latency).
+Nmap scan report for webclient.poc-datacollector_datacollector-net (172.25.0.6)
+Host is up (0.00016s latency).
+Nmap scan report for 3c273d36124c (172.25.0.7)
+Host is up (0.00013s latency).
+Nmap scan report for hybrid-linux_registry_1.poc-datacollector_datacollector-net (172.25.0.8)
+Host is up (0.00011s latency).
+Nmap scan report for hybrid-linux_worker_1.poc-datacollector_datacollector-net (172.25.0.9)
+Host is up (0.000091s latency).
+Nmap done: 256 IP addresses (9 hosts up) scanned in 3.08 seconds
+
+
+7. Find open port
+	docker@3c273d36124c:~$ nmap -p 22 172.25.0.9
+
+Starting Nmap 7.60 ( https://nmap.org ) at 2021-12-04 17:08 EET
+Nmap scan report for hybrid-linux_worker_1.poc-datacollector_datacollector-net (172.25.0.9)
+Host is up (0.00018s latency).
+
+PORT   STATE SERVICE
+22/tcp open  ssh
+
+Nmap done: 1 IP address (1 host up) scanned in 0.02 seconds
+
+
+8. Attack from master to worker container
+	docker@3c273d36124c:~$ sudo hping3 -d 256 -S -p 22 --flood 172.25.0.9
+HPING 172.30.0.3 (eth0 172.30.0.3): S set, 40 headers + 256 data bytes
+hping in flood mode, no replies will be shown
+
+sudo: gives needed privileges to run hping3.
+hping3: calls hping3 program.
+-S: specifies SYN packets.
+–flood: shoot at discretion, replies will be ignored (that’s why replies wont be shown) and packets will be sent fast as possible.
+-V: Verbosity.
+-p 22: port 22
+172.25.0.9: target IP.
+
+9. Connect to worker machine
+	docker exec -it -udocker hybrid-linux_worker_1 /bin/bash
+
+10. View receiving packets
+	docker@452f6617bcc9:~$ sudo tcpdump -l
+
+11. Protection // iptables
+	docker@452f6617bcc9:~$ sudo su
+	root@452f6617bcc9:/home/docker# iptables -A INPUT -p tcp --dport 22 -m state --state NEW,ESTABLISHED -m recent --set -j ACCEPT
+
+	root@452f6617bcc9:/home/docker# iptables -A INPUT -p tcp --dport 22 -m state --state NEW -m recent --update --seconds 5 --hitcount 10 -j DROP
+
+	root@452f6617bcc9:/home/docker# iptables -A OUTPUT -p tcp --dport 22 -m state --state ESTABLISHED -j ACCEPT
+
+12. Drop non syn-ack packets
+	root@452f6617bcc9:/home/docker# iptables -A INPUT -p tcp ! --syn -m state --state NEW -j DROP
+
+13. Drop all NULL packets
+	root@452f6617bcc9:/home/docker# iptables -A INPUT -p tcp --tcp-flags ALL NONE -j DROP
+
+14 .View iptables
+	root@452f6617bcc9:/home/docker# iptables -nvL
+Chain INPUT (policy ACCEPT 0 packets, 0 bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+  82M   24G DROP       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:22 state NEW recent: UPDATE seconds: 5 hit_count: 10 name: DEFAULT side: source mask: 255.255.255.255
+   10  2960 DROP       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:22 state NEW recent: UPDATE seconds: 600 hit_count: 11 name: DEFAULT side: source mask: 255.255.255.255
+12650  684K ACCEPT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:22 state NEW,ESTABLISHED recent: SET name: DEFAULT side: source mask: 255.255.255.255
+    0     0 ACCEPT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:22 state NEW,ESTABLISHED recent: SET name: DEFAULT side: source mask: 255.255.255.255
+    0     0 DROP       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:22 state NEW recent: UPDATE seconds: 5 hit_count: 10 name: DEFAULT side: source mask: 255.255.255.255
+    0     0 REJECT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:22 state NEW recent: UPDATE seconds: 5 hit_count: 10 name: DEFAULT side: source mask: 255.255.255.255 reject-with icmp-port-unreachable  
+    0     0 DROP       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp flags:!0x17/0x02 state NEW
+    0     0 DROP       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp flags:0x3F/0x00
+
+Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+
+Chain OUTPUT (policy ACCEPT 12 packets, 3344 bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+    0     0 ACCEPT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:22 state ESTABLISHED
+
+
+
+
+	
